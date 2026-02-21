@@ -1,136 +1,111 @@
-use std::env;
+#[path = "api.rs"]
+mod lc_api;
+#[path = "core.rs"]
+mod lc_core;
+#[path = "provider.rs"]
+mod lc_provider;
+#[path = "sandbox.rs"]
+mod lc_sandbox;
+#[path = "scheduler.rs"]
+mod lc_scheduler;
+mod adapters {
+    pub mod telegram;
+}
 
-use jarvis::{
-    benchmark::run_startup_benchmark,
-    channels::{ChannelAdapter, CliAdapter},
-    config::AppConfig,
-    core::Agent,
-    policy::{Permission, Policy},
-    providers::{provider_from_config, ProviderRouter},
-    registry::{publish_from_file, PluginRegistryService},
-    sandbox::DenyByDefaultSandbox,
-    telegram::{run_telegram_webhook_once, TelegramAdapter},
-    web::run_web_ui_once,
-};
+use lc_provider::{MockProvider, OpenAiProvider};
+use std::{env, fs, sync::Arc};
 
-fn build_agent(config: &AppConfig) -> Agent {
-    let policy = Policy::allow_list([
-        Permission::MemoryRead,
-        Permission::MemoryWrite,
-        Permission::ToolExec,
-    ]);
-    let router = ProviderRouter::new(vec![provider_from_config(&config.llm)]);
-    Agent::new(policy, router, Box::new(DenyByDefaultSandbox))
+#[derive(Debug, Clone)]
+struct Config {
+    api_bind: String,
+    db_path: String,
+    encryption_key: String,
+    openai_api_key: Option<String>,
+    openai_model: String,
+    telegram_bot_token: Option<String>,
+    telegram_chat_id: Option<String>,
+    scheduler_tasks_file: String,
+}
+
+fn load_config(path: &str) -> Result<Config, String> {
+    let src = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    Ok(Config {
+        api_bind: read_toml_value(&src, "api_bind").unwrap_or_else(|| "127.0.0.1:8080".into()),
+        db_path: read_toml_value(&src, "db_path").unwrap_or_else(|| "lightclaw.db".into()),
+        encryption_key: read_toml_value(&src, "encryption_key").unwrap_or_else(|| "dev-key".into()),
+        openai_api_key: read_toml_value(&src, "openai_api_key").filter(|v| !v.is_empty()),
+        openai_model: read_toml_value(&src, "openai_model").unwrap_or_else(|| "gpt-4o-mini".into()),
+        telegram_bot_token: read_toml_value(&src, "telegram_bot_token").filter(|v| !v.is_empty()),
+        telegram_chat_id: read_toml_value(&src, "telegram_chat_id").filter(|v| !v.is_empty()),
+        scheduler_tasks_file: read_toml_value(&src, "scheduler_tasks_file")
+            .unwrap_or_else(|| "config/scheduler.toml".into()),
+    })
+}
+
+fn read_toml_value(src: &str, key: &str) -> Option<String> {
+    src.lines()
+        .find(|line| line.trim_start().starts_with(&format!("{key} =")))
+        .and_then(|line| line.split_once('='))
+        .map(|(_, value)| value.trim().trim_matches('"').to_string())
+}
+
+fn build_core(cfg: &Config) -> Result<Arc<lc_core::Core>, String> {
+    let provider: Arc<dyn lc_provider::LlmProvider> = if let Some(key) = &cfg.openai_api_key {
+        Arc::new(OpenAiProvider {
+            api_key: key.clone(),
+            model: cfg.openai_model.clone(),
+        })
+    } else {
+        Arc::new(MockProvider)
+    };
+    Ok(Arc::new(lc_core::Core::new(
+        provider,
+        &cfg.db_path,
+        &cfg.encryption_key,
+    )?))
 }
 
 fn main() {
-    let mut args = env::args().skip(1);
-    let config = AppConfig::from_env();
+    let args: Vec<String> = env::args().collect();
+    let command = args.get(1).map(|s| s.as_str()).unwrap_or("chat");
+    let config_path = "lightclaw.toml";
 
-    if let Err(err) = config.validate_telegram() {
-        eprintln!("config error: {err}");
-        std::process::exit(1);
+    if command == "init" {
+        if !std::path::Path::new(config_path).exists() {
+            fs::write(config_path, include_str!("../lightclaw.toml")).expect("write config");
+            println!("created {}", config_path);
+        }
+        return;
     }
 
-    let command = args
-        .next()
-        .unwrap_or_else(|| config.runtime.default_mode.clone());
+    let cfg = load_config(config_path).expect("config load");
+    let core = build_core(&cfg).expect("core");
 
-    match command.as_str() {
-        "serve-web" => {
-            let mut agent = build_agent(&config);
-            if let Err(err) = run_web_ui_once(&config.runtime.web_bind, &mut agent) {
-                eprintln!("web ui failed: {err}");
-                std::process::exit(1);
-            }
+    match command {
+        "start" => {
+            lc_api::run_api(&cfg.api_bind, core).expect("api run");
+        }
+        "chat" => {
+            let prompt = args.get(2).cloned().unwrap_or_else(|| "hello".into());
+            println!("{}", core.handle_message(&prompt).expect("chat"));
         }
         "telegram-poll-once" => {
-            let mut agent = build_agent(&config);
-            match TelegramAdapter::from_config(&config.telegram)
-                .and_then(|adapter| adapter.handle_polling_once(&mut agent))
-            {
-                Ok(count) => println!("telegram updates handled: {count}"),
-                Err(err) => {
-                    eprintln!("telegram polling failed: {err:?}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        "telegram-webhook-once" => {
-            let mut agent = build_agent(&config);
-            let bind = config
-                .telegram
-                .webhook_url
-                .clone()
-                .unwrap_or_else(|| "127.0.0.1:9090".to_string());
-            if let Err(err) = run_telegram_webhook_once(&bind, &mut agent) {
-                eprintln!("telegram webhook failed: {err}");
-                std::process::exit(1);
-            }
-        }
-        "publish-plugin" => {
-            let path = args
-                .next()
-                .unwrap_or_else(|| "examples/plugin-manifest.json".to_string());
-            let service = PluginRegistryService::new(
-                config.runtime.registry_path.clone(),
-                config.runtime.registry_secret.clone(),
-            );
-            match publish_from_file(&service, path, "notes", "0.1.0") {
-                Ok(published) => println!("published {}:{}", published.name, published.version),
-                Err(err) => {
-                    eprintln!("publish failed: {err}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        "bench" => {
-            let result = run_startup_benchmark(config.runtime.benchmark_iterations);
-            println!(
-                "startup benchmark: iterations={} avg={}us total={}ms",
-                result.iterations,
-                result.average_micros,
-                result.total.as_millis()
-            );
-        }
-        "show-config" => {
-            println!("{}", config.redacted_summary());
-            println!("llm_api_base_set={}", config.llm.api_base.is_some());
-            println!("llm_api_key_set={}", config.llm.api_key.is_some());
-            println!(
-                "telegram_api_base_set={}",
-                config.telegram.api_base.is_some()
+            let adapter = adapters::telegram::TelegramAdapter::new(
+                cfg.telegram_bot_token.expect("telegram_bot_token missing"),
+                cfg.telegram_chat_id.expect("telegram_chat_id missing"),
             );
             println!(
-                "telegram_webhook_set={}",
-                config.telegram.webhook_url.is_some()
+                "handled {} updates",
+                adapter.poll_once(&core).expect("telegram")
             );
         }
-        other => {
-            let prompt = if other == "chat" {
-                args.next()
-                    .unwrap_or_else(|| "Hello from Secure LightClaw v2".to_string())
-            } else {
-                other.to_string()
-            };
-
-            let mut agent = build_agent(&config);
-            let adapter = CliAdapter;
-            let incoming = adapter.normalize("local-user", &prompt);
-
-            match agent.handle_message(incoming) {
-                Ok(response) => {
-                    println!("{}", response.text);
-                    let tool_result = agent
-                        .run_tool("echo", &["tool".to_string(), "ok".to_string()])
-                        .expect("tool should run when permission granted");
-                    println!("tool: {tool_result}");
-                }
-                Err(err) => {
-                    eprintln!("agent failed: {err}");
-                    std::process::exit(1);
-                }
-            }
+        "run-scheduler-once" => {
+            let tasks = lc_core::Core::load_tasks(&cfg.scheduler_tasks_file).expect("tasks");
+            println!(
+                "executed {} task(s)",
+                core.run_scheduler_once(&tasks).expect("scheduler")
+            );
         }
+        _ => eprintln!("unknown command"),
     }
 }

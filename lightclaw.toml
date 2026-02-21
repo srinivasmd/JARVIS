@@ -1,0 +1,8 @@
+api_bind = "127.0.0.1:8080"
+db_path = "lightclaw.db"
+encryption_key = "change-this-secret"
+openai_api_key = ""
+openai_model = "gpt-4o-mini"
+telegram_bot_token = ""
+telegram_chat_id = ""
+scheduler_tasks_file = "config/scheduler.toml"

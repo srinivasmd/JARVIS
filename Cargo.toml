@@ -3,6 +3,6 @@ name = "jarvis"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Secure LightClaw-inspired assistant scaffold"
+description = "Secure LightClaw — secure lightweight AI assistant framework"
 
 [dependencies]

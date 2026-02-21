@@ -1,0 +1,5 @@
+[[tasks]]
+name = "demo-task"
+cron = "0/30 * * * * * *"
+plugin_manifest = "config/plugins/demo-plugin.json"
+capability = "scheduler.run"

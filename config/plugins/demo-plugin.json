@@ -1,0 +1,5 @@
+{
+  "name": "demo-plugin",
+  "wasm_path": "plugins/demo.wasm",
+  "permissions": ["scheduler.run", "memory.read"]
+}
