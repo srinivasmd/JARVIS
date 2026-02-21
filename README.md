@@ -48,8 +48,12 @@ Then run:
 cargo run -- telegram-poll-once
 ```
 
-## OpenAI API Key Setup
-Generate an API key in your OpenAI dashboard and set `openai_api_key` and `openai_model` in `lightclaw.toml`.
+## LLM Provider Setup
+Set provider fields in `lightclaw.toml`:
+- Primary: `llm_primary_provider`, `llm_primary_api_key`, `llm_primary_model`, `llm_primary_api_base`
+- Fallback: `llm_fallback_provider`, `llm_fallback_api_key`, `llm_fallback_model`, `llm_fallback_api_base`
+
+The runtime now tries the primary provider first and automatically falls back when the primary call fails.
 
 Quick test:
 ```bash

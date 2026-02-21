@@ -1,8 +1,20 @@
 api_bind = "127.0.0.1:8080"
+default_command = "chat"
+default_chat_prompt = "hello"
+
 db_path = "lightclaw.db"
 encryption_key = "change-this-secret"
-openai_api_key = ""
-openai_model = "gpt-4o-mini"
+
+llm_primary_provider = "openai"
+llm_primary_api_key = ""
+llm_primary_model = "gpt-4o-mini"
+llm_primary_api_base = "http://api.openai.com/v1"
+
+llm_fallback_provider = "mock"
+llm_fallback_api_key = ""
+llm_fallback_model = "gpt-4o-mini"
+llm_fallback_api_base = "http://api.openai.com/v1"
+
 telegram_bot_token = ""
 telegram_chat_id = ""
 scheduler_tasks_file = "config/scheduler.toml"
