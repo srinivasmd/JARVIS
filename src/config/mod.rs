@@ -14,6 +14,8 @@ pub struct TelegramConfig {
     pub bot_token: Option<String>,
     pub chat_id: Option<String>,
     pub webhook_url: Option<String>,
+    pub api_base: Option<String>,
+    pub polling_interval_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +48,12 @@ impl AppConfig {
             bot_token: env::var("JARVIS_TELEGRAM_BOT_TOKEN").ok(),
             chat_id: env::var("JARVIS_TELEGRAM_CHAT_ID").ok(),
             webhook_url: env::var("JARVIS_TELEGRAM_WEBHOOK_URL").ok(),
+            api_base: env::var("JARVIS_TELEGRAM_API_BASE").ok(),
+            polling_interval_ms: env::var("JARVIS_TELEGRAM_POLL_INTERVAL_MS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .filter(|v| *v > 0)
+                .unwrap_or(1000),
         };
 
         let runtime = RuntimeConfig {
@@ -85,13 +93,14 @@ impl AppConfig {
 
     pub fn redacted_summary(&self) -> String {
         format!(
-            "provider={} model={} web_bind={} telegram_enabled={} registry_path={} bench_iterations={}",
+            "provider={} model={} web_bind={} telegram_enabled={} registry_path={} bench_iterations={} tg_poll_ms={}",
             self.llm.provider,
             self.llm.model,
             self.runtime.web_bind,
             self.telegram.enabled,
             self.runtime.registry_path,
-            self.runtime.benchmark_iterations
+            self.runtime.benchmark_iterations,
+            self.telegram.polling_interval_ms
         )
     }
 }

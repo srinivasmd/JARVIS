@@ -159,14 +159,17 @@ mod tests {
     use super::*;
     use crate::{
         plugins::{ManifestPermission, PluginManifest, PluginRegistry, PluginSource},
-        providers::EchoProvider,
+        providers::ConfiguredEchoProvider,
         sandbox::DenyByDefaultSandbox,
     };
 
     #[test]
     fn agent_generates_response_and_audits() {
         let policy = Policy::allow_list([Permission::MemoryRead, Permission::MemoryWrite]);
-        let router = ProviderRouter::new(vec![Box::new(EchoProvider)]);
+        let router = ProviderRouter::new(vec![Box::new(ConfiguredEchoProvider::new(
+            "echo-local",
+            "mock-1",
+        ))]);
         let mut agent = Agent::new(policy, router, Box::new(DenyByDefaultSandbox));
 
         let mut registry = PluginRegistry::new(false);
@@ -189,7 +192,10 @@ mod tests {
     #[test]
     fn heartbeat_runs_scheduled_task() {
         let policy = Policy::allow_list([Permission::MemoryRead]);
-        let router = ProviderRouter::new(vec![Box::new(EchoProvider)]);
+        let router = ProviderRouter::new(vec![Box::new(ConfiguredEchoProvider::new(
+            "echo-local",
+            "mock-1",
+        ))]);
         let mut agent = Agent::new(policy, router, Box::new(DenyByDefaultSandbox));
         agent.add_schedule("tick", 1, "cron:sync");
 
