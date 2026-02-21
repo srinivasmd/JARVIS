@@ -1,0 +1,7 @@
+{
+  "name": "notes",
+  "version": "0.1.0",
+  "capabilities": ["store_notes"],
+  "permissions": ["memory_read", "memory_write"],
+  "source": "vetted_registry"
+}
