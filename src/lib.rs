@@ -1,16 +1,3 @@
-pub mod api;
-pub mod audit;
-pub mod benchmark;
-pub mod channels;
-pub mod config;
-pub mod core;
-pub mod memory;
-pub mod net;
-pub mod plugins;
-pub mod policy;
-pub mod providers;
-pub mod registry;
-pub mod sandbox;
-pub mod scheduler;
-pub mod telegram;
-pub mod web;
+//! Library surface is intentionally minimal; the primary app lives in `src/main.rs`.
+
+pub const APP_NAME: &str = "Secure LightClaw";

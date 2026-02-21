@@ -1,141 +1,62 @@
-# JARVIS
+# Secure LightClaw
 
-A lightweight personal AI assistant project focused on secure-by-default architecture.
+Secure LightClaw is a lightweight, secure AI assistant framework written in Rust.
 
-## Secure LightClaw v2 Status
+## Features
+- Modular core with pluggable LLM provider abstraction.
+- WASM plugin sandbox with explicit manifest permissions.
+- Channels: CLI, HTTP API, Telegram polling adapter.
+- Encrypted persistent memory using SQLite + AEAD envelope encryption.
+- Cron-like scheduler for plugin automation.
 
-Implementation coverage versus `docs/secure-lightclaw-plan.md` is currently **100% (25/25 roadmap items)** with executable scaffolds across all phases.
-
-## Quick Start
-
+## Build
 ```bash
-cargo run -- chat "hello jarvis"
+cargo build
 ```
 
-## Commands
-
-- Chat mode:
-  ```bash
-  cargo run -- chat "hello jarvis"
-  ```
-- Web UI mode (single request lifecycle):
-  ```bash
-  cargo run -- serve-web
-  ```
-- Telegram polling (single cycle):
-  ```bash
-  cargo run -- telegram-poll-once
-  ```
-- Telegram webhook listener (single request lifecycle):
-  ```bash
-  cargo run -- telegram-webhook-once
-  ```
-- Publish example plugin to local registry path:
-  ```bash
-  cargo run -- publish-plugin examples/plugin-manifest.json
-  ```
-- Startup benchmark:
-  ```bash
-  cargo run -- bench
-  ```
-- Show effective config (redacted):
-  ```bash
-  cargo run -- show-config
-  ```
-
-## Configuration
-
-Configuration is environment-variable driven.
-
-### 1) LLM Provider + Model
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `JARVIS_LLM_PROVIDER` | `echo-local` | Provider selector (`echo-local`, `openai`, `openai-compatible`, `anthropic`). |
-| `JARVIS_LLM_MODEL` | `mock-1` | Model identifier passed to provider adapters. |
-| `JARVIS_LLM_API_BASE` | unset | Base URL for provider API (for example `http://127.0.0.1:11434/v1`). |
-| `JARVIS_LLM_API_KEY` | unset | API key used in provider auth headers. |
-
-Example (OpenAI-compatible):
-
+## Run
+1. Initialize config:
 ```bash
-export JARVIS_LLM_PROVIDER=openai-compatible
-export JARVIS_LLM_MODEL=gpt-4.1-mini
-export JARVIS_LLM_API_BASE=http://127.0.0.1:4000/v1
-export JARVIS_LLM_API_KEY=local-dev-key
-cargo run -- chat "summarize this"
+cargo run -- init
+```
+2. Edit `lightclaw.toml` with API keys.
+3. Chat from CLI:
+```bash
+cargo run -- chat "hello"
+```
+4. Start API:
+```bash
+cargo run -- start
 ```
 
-Example (Anthropic-style endpoint):
-
+## Add Plugins
+1. Build a WASM plugin exporting `run() -> i32`.
+2. Create a plugin manifest JSON with `permissions`.
+3. Reference that manifest in `config/scheduler.toml`.
+4. Execute scheduler once:
 ```bash
-export JARVIS_LLM_PROVIDER=anthropic
-export JARVIS_LLM_MODEL=claude-3-5-sonnet-20240620
-export JARVIS_LLM_API_BASE=http://127.0.0.1:5000/v1
-export JARVIS_LLM_API_KEY=local-dev-key
-cargo run -- chat "explain this"
+cargo run -- run-scheduler-once
 ```
 
-> Note: current adapters use stdlib HTTP transport and support `http://` endpoints (local proxy/dev gateways) out of the box.
+## Telegram Adapter
+Set these values in `lightclaw.toml`:
+- `telegram_bot_token`
+- `telegram_chat_id`
 
-### 2) Telegram Settings (Polling + Webhook)
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `JARVIS_TELEGRAM_ENABLED` | `false` | Enables Telegram startup validation and command use. |
-| `JARVIS_TELEGRAM_BOT_TOKEN` | unset | Telegram bot token (required when enabled). |
-| `JARVIS_TELEGRAM_CHAT_ID` | unset | Default outbound chat ID (required when enabled). |
-| `JARVIS_TELEGRAM_API_BASE` | unset | Telegram API base URL (defaults internally to `http://127.0.0.1:8081` for local adapter testing). |
-| `JARVIS_TELEGRAM_WEBHOOK_URL` | unset | Bind address for `telegram-webhook-once` (example: `127.0.0.1:9090`). |
-| `JARVIS_TELEGRAM_POLL_INTERVAL_MS` | `1000` | Poll interval config value for polling workflows. |
-
-Polling example:
-
+Then run:
 ```bash
-export JARVIS_TELEGRAM_ENABLED=true
-export JARVIS_TELEGRAM_BOT_TOKEN=123456:ABCDEF
-export JARVIS_TELEGRAM_CHAT_ID=987654321
-export JARVIS_TELEGRAM_API_BASE=http://127.0.0.1:8081
 cargo run -- telegram-poll-once
 ```
 
-Webhook example:
+## OpenAI API Key Setup
+Generate an API key in your OpenAI dashboard and set `openai_api_key` and `openai_model` in `lightclaw.toml`.
 
+Quick test:
 ```bash
-export JARVIS_TELEGRAM_ENABLED=true
-export JARVIS_TELEGRAM_BOT_TOKEN=123456:ABCDEF
-export JARVIS_TELEGRAM_CHAT_ID=987654321
-export JARVIS_TELEGRAM_WEBHOOK_URL=127.0.0.1:9090
-cargo run -- telegram-webhook-once
+cargo run -- chat "Summarize secure plugin isolation in one sentence"
 ```
 
-### 3) Runtime / App Settings
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `JARVIS_WEB_BIND` | `127.0.0.1:7878` | Bind address for `serve-web`. |
-| `JARVIS_DEFAULT_MODE` | `chat` | Command used when running `cargo run --` without an explicit command. |
-| `JARVIS_REGISTRY_PATH` | `registry` | Local directory for published plugin artifacts/signatures. |
-| `JARVIS_REGISTRY_SECRET` | `local-dev-secret` | Secret used for deterministic registry signing/verification. |
-| `JARVIS_BENCH_ITERATIONS` | `100` | Iteration count used by benchmark mode. |
-
-## Helper Scripts
-
-```bash
-./scripts/start-local-api.sh
-./scripts/publish-example-plugin.sh
-./scripts/run-bench.sh
-./scripts/build-release.sh
-```
-
-## Test
-
+## Tests
 ```bash
 cargo test
 ```
-
-## Development Plan
-
-- [docs/secure-lightclaw-plan.md](docs/secure-lightclaw-plan.md)
-- [docs/implementation-status.md](docs/implementation-status.md)
-- [docs/feature-ideas-v3.md](docs/feature-ideas-v3.md)
