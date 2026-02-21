@@ -12,16 +12,24 @@ mod adapters {
     pub mod telegram;
 }
 
-use lc_provider::{MockProvider, OpenAiProvider};
+use lc_provider::{FallbackProvider, MockProvider, OpenAiProvider};
 use std::{env, fs, sync::Arc};
 
 #[derive(Debug, Clone)]
 struct Config {
     api_bind: String,
+    default_command: String,
+    default_chat_prompt: String,
     db_path: String,
     encryption_key: String,
-    openai_api_key: Option<String>,
-    openai_model: String,
+    llm_primary_provider: String,
+    llm_primary_api_key: Option<String>,
+    llm_primary_model: String,
+    llm_primary_api_base: String,
+    llm_fallback_provider: String,
+    llm_fallback_api_key: Option<String>,
+    llm_fallback_model: String,
+    llm_fallback_api_base: String,
     telegram_bot_token: Option<String>,
     telegram_chat_id: Option<String>,
     scheduler_tasks_file: String,
@@ -31,10 +39,26 @@ fn load_config(path: &str) -> Result<Config, String> {
     let src = fs::read_to_string(path).map_err(|e| e.to_string())?;
     Ok(Config {
         api_bind: read_toml_value(&src, "api_bind").unwrap_or_else(|| "127.0.0.1:8080".into()),
+        default_command: read_toml_value(&src, "default_command").unwrap_or_else(|| "chat".into()),
+        default_chat_prompt: read_toml_value(&src, "default_chat_prompt")
+            .unwrap_or_else(|| "hello".into()),
         db_path: read_toml_value(&src, "db_path").unwrap_or_else(|| "lightclaw.db".into()),
         encryption_key: read_toml_value(&src, "encryption_key").unwrap_or_else(|| "dev-key".into()),
-        openai_api_key: read_toml_value(&src, "openai_api_key").filter(|v| !v.is_empty()),
-        openai_model: read_toml_value(&src, "openai_model").unwrap_or_else(|| "gpt-4o-mini".into()),
+        llm_primary_provider: read_toml_value(&src, "llm_primary_provider")
+            .unwrap_or_else(|| "openai".into()),
+        llm_primary_api_key: read_toml_value(&src, "llm_primary_api_key").filter(|v| !v.is_empty()),
+        llm_primary_model: read_toml_value(&src, "llm_primary_model")
+            .unwrap_or_else(|| "gpt-4o-mini".into()),
+        llm_primary_api_base: read_toml_value(&src, "llm_primary_api_base")
+            .unwrap_or_else(|| "http://api.openai.com/v1".into()),
+        llm_fallback_provider: read_toml_value(&src, "llm_fallback_provider")
+            .unwrap_or_else(|| "mock".into()),
+        llm_fallback_api_key: read_toml_value(&src, "llm_fallback_api_key")
+            .filter(|v| !v.is_empty()),
+        llm_fallback_model: read_toml_value(&src, "llm_fallback_model")
+            .unwrap_or_else(|| "gpt-4o-mini".into()),
+        llm_fallback_api_base: read_toml_value(&src, "llm_fallback_api_base")
+            .unwrap_or_else(|| "http://api.openai.com/v1".into()),
         telegram_bot_token: read_toml_value(&src, "telegram_bot_token").filter(|v| !v.is_empty()),
         telegram_chat_id: read_toml_value(&src, "telegram_chat_id").filter(|v| !v.is_empty()),
         scheduler_tasks_file: read_toml_value(&src, "scheduler_tasks_file")
@@ -50,14 +74,20 @@ fn read_toml_value(src: &str, key: &str) -> Option<String> {
 }
 
 fn build_core(cfg: &Config) -> Result<Arc<lc_core::Core>, String> {
-    let provider: Arc<dyn lc_provider::LlmProvider> = if let Some(key) = &cfg.openai_api_key {
-        Arc::new(OpenAiProvider {
-            api_key: key.clone(),
-            model: cfg.openai_model.clone(),
-        })
-    } else {
-        Arc::new(MockProvider)
-    };
+    let primary = build_provider(
+        &cfg.llm_primary_provider,
+        &cfg.llm_primary_api_key,
+        &cfg.llm_primary_model,
+        &cfg.llm_primary_api_base,
+    );
+    let fallback = build_provider(
+        &cfg.llm_fallback_provider,
+        &cfg.llm_fallback_api_key,
+        &cfg.llm_fallback_model,
+        &cfg.llm_fallback_api_base,
+    );
+    let provider: Arc<dyn lc_provider::LlmProvider> =
+        Arc::new(FallbackProvider { primary, fallback });
     Ok(Arc::new(lc_core::Core::new(
         provider,
         &cfg.db_path,
@@ -65,12 +95,28 @@ fn build_core(cfg: &Config) -> Result<Arc<lc_core::Core>, String> {
     )?))
 }
 
+fn build_provider(
+    provider: &str,
+    api_key: &Option<String>,
+    model: &str,
+    api_base: &str,
+) -> Arc<dyn lc_provider::LlmProvider> {
+    match provider {
+        "openai" if api_key.is_some() => Arc::new(OpenAiProvider {
+            api_key: api_key.clone().unwrap_or_default(),
+            model: model.to_string(),
+            api_base: api_base.to_string(),
+        }),
+        _ => Arc::new(MockProvider),
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let command = args.get(1).map(|s| s.as_str()).unwrap_or("chat");
+    let raw_command = args.get(1).map(|s| s.as_str()).unwrap_or("chat");
     let config_path = "lightclaw.toml";
 
-    if command == "init" {
+    if raw_command == "init" {
         if !std::path::Path::new(config_path).exists() {
             fs::write(config_path, include_str!("../lightclaw.toml")).expect("write config");
             println!("created {}", config_path);
@@ -79,6 +125,10 @@ fn main() {
     }
 
     let cfg = load_config(config_path).expect("config load");
+    let command = args
+        .get(1)
+        .map(|s| s.as_str())
+        .unwrap_or(cfg.default_command.as_str());
     let core = build_core(&cfg).expect("core");
 
     match command {
@@ -86,7 +136,10 @@ fn main() {
             lc_api::run_api(&cfg.api_bind, core).expect("api run");
         }
         "chat" => {
-            let prompt = args.get(2).cloned().unwrap_or_else(|| "hello".into());
+            let prompt = args
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| cfg.default_chat_prompt.clone());
             println!("{}", core.handle_message(&prompt).expect("chat"));
         }
         "telegram-poll-once" => {
