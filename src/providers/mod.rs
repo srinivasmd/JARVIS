@@ -1,5 +1,3 @@
-use crate::config::LlmConfig;
-
 #[derive(Debug, Clone)]
 pub struct ProviderRequest {
     pub user_input: String,
@@ -32,23 +30,11 @@ pub trait LlmProvider {
     fn generate(&self, request: &ProviderRequest) -> Result<ProviderResponse, ProviderError>;
 }
 
-pub struct ConfiguredEchoProvider {
-    provider: String,
-    model: String,
-}
+pub struct EchoProvider;
 
-impl ConfiguredEchoProvider {
-    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
-        Self {
-            provider: provider.into(),
-            model: model.into(),
-        }
-    }
-}
-
-impl LlmProvider for ConfiguredEchoProvider {
+impl LlmProvider for EchoProvider {
     fn name(&self) -> &str {
-        &self.provider
+        "echo-local"
     }
 
     fn generate(&self, request: &ProviderRequest) -> Result<ProviderResponse, ProviderError> {
@@ -59,16 +45,9 @@ impl LlmProvider for ConfiguredEchoProvider {
         };
         Ok(ProviderResponse {
             output: format!("{}{}", prefix, request.user_input),
-            model: self.model.clone(),
+            model: self.name().to_string(),
         })
     }
-}
-
-pub fn provider_from_config(config: &LlmConfig) -> Box<dyn LlmProvider> {
-    Box::new(ConfiguredEchoProvider::new(
-        config.provider.clone(),
-        config.model.clone(),
-    ))
 }
 
 pub struct ProviderRouter {
@@ -108,10 +87,7 @@ mod tests {
 
     #[test]
     fn router_falls_back_to_next_provider() {
-        let router = ProviderRouter::new(vec![
-            Box::new(FailingProvider),
-            Box::new(ConfiguredEchoProvider::new("echo-local", "mock-1")),
-        ]);
+        let router = ProviderRouter::new(vec![Box::new(FailingProvider), Box::new(EchoProvider)]);
         let response = router
             .generate(&ProviderRequest {
                 user_input: "hello".to_string(),
@@ -120,6 +96,6 @@ mod tests {
             .expect("fallback provider should respond");
 
         assert_eq!(response.output, "hello");
-        assert_eq!(response.model, "mock-1");
+        assert_eq!(response.model, "echo-local");
     }
 }

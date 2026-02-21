@@ -2,7 +2,6 @@ pub mod api;
 pub mod audit;
 pub mod benchmark;
 pub mod channels;
-pub mod config;
 pub mod core;
 pub mod memory;
 pub mod plugins;

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::{
     core::Agent,
     policy::{Permission, Policy},
-    providers::{ConfiguredEchoProvider, ProviderRouter},
+    providers::{EchoProvider, ProviderRouter},
     sandbox::DenyByDefaultSandbox,
 };
 
@@ -24,10 +24,7 @@ pub fn run_startup_benchmark(iterations: usize) -> BenchmarkResult {
             Permission::MemoryWrite,
             Permission::ToolExec,
         ]);
-        let router = ProviderRouter::new(vec![Box::new(ConfiguredEchoProvider::new(
-            "echo-local",
-            "bench-model",
-        ))]);
+        let router = ProviderRouter::new(vec![Box::new(EchoProvider)]);
         let mut agent = Agent::new(policy, router, Box::new(DenyByDefaultSandbox));
         let _ = agent.run_prompt("bench");
     }

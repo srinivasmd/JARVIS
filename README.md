@@ -1,4 +1,5 @@
 # JARVIS
+My Person Low Code AI Assistant 
 
 A lightweight personal AI assistant project focused on secure-by-default architecture.
 
