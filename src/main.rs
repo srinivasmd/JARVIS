@@ -12,7 +12,7 @@ mod adapters {
     pub mod telegram;
 }
 
-use lc_provider::{FallbackProvider, MockProvider, OpenAiProvider};
+use lc_provider::{FallbackProvider, LlmRequest, MockProvider, OpenAiProvider};
 use std::{env, fs, sync::Arc};
 
 #[derive(Debug, Clone)]
@@ -158,6 +158,28 @@ fn main() {
                 "executed {} task(s)",
                 core.run_scheduler_once(&tasks).expect("scheduler")
             );
+        }
+        "test-llm" => {
+            let prompt = args
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| "Respond with the single word: ok".to_string());
+            let provider = build_provider(
+                &cfg.llm_primary_provider,
+                &cfg.llm_primary_api_key,
+                &cfg.llm_primary_model,
+                &cfg.llm_primary_api_base,
+            );
+            match provider.generate(LlmRequest { prompt }) {
+                Ok(response) => {
+                    println!("model={}", response.model);
+                    println!("{}", response.text);
+                }
+                Err(error) => {
+                    eprintln!("primary llm request failed: {}", error);
+                    std::process::exit(2);
+                }
+            }
         }
         _ => eprintln!("unknown command"),
     }

@@ -1,5 +1,4 @@
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::process::Command;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -25,71 +24,67 @@ pub struct OpenAiProvider {
 
 impl LlmProvider for OpenAiProvider {
     fn generate(&self, req: LlmRequest) -> Result<LlmResponse, String> {
-        // Design choice: keep transport dependency-free using raw HTTP over TLS-disabled dev endpoint.
-        // For production, wire a hardened HTTP client.
-        let endpoint = OpenAiEndpoint::parse(&self.api_base)?;
-        let mut stream = TcpStream::connect(format!("{}:{}", endpoint.host, endpoint.port))
-            .map_err(|e| e.to_string())?;
+        let endpoint = OpenAiEndpoint::parse(&self.api_base);
         let body = format!(
             "{{\"model\":\"{}\",\"messages\":[{{\"role\":\"user\",\"content\":\"{}\"}}]}}",
             self.model,
             req.prompt.replace('"', "'")
         );
-        let path = format!("{}/chat/completions", endpoint.base_path);
-        let req = format!(
-            "POST {} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-            path,
-            endpoint.host,
-            self.api_key,
-            body.len(),
-            body
-        );
-        stream
-            .write_all(req.as_bytes())
-            .map_err(|e| e.to_string())?;
-        let mut out = String::new();
-        stream.read_to_string(&mut out).map_err(|e| e.to_string())?;
+
+        let response = Command::new("curl")
+            .arg("--silent")
+            .arg("--show-error")
+            .arg("--fail")
+            .arg("--max-time")
+            .arg("45")
+            .arg("-H")
+            .arg("Content-Type: application/json")
+            .arg("-H")
+            .arg(format!("Authorization: Bearer {}", self.api_key))
+            .arg("-d")
+            .arg(body)
+            .arg(endpoint.chat_completions_url())
+            .output()
+            .map_err(|e| format!("failed to launch curl: {e}"))?;
+
+        if !response.status.success() {
+            return Err(format!(
+                "provider request failed: {}",
+                String::from_utf8_lossy(&response.stderr).trim()
+            ));
+        }
+
+        let out = String::from_utf8_lossy(&response.stdout).to_string();
+        let content = extract_message_content(&out).unwrap_or_else(|| out.clone());
         Ok(LlmResponse {
-            text: format!("openai_raw_response:{}", out.lines().next().unwrap_or("")),
+            text: content,
             model: self.model.clone(),
         })
     }
 }
 
-#[derive(Debug)]
 struct OpenAiEndpoint {
-    host: String,
-    port: u16,
-    base_path: String,
+    base_url: String,
 }
 
 impl OpenAiEndpoint {
-    fn parse(input: &str) -> Result<Self, String> {
-        let raw = input
-            .trim()
-            .trim_start_matches("http://")
-            .trim_start_matches("https://");
-        let (host_and_port, path) = raw
-            .split_once('/')
-            .map(|(host, p)| (host, format!("/{}", p.trim_matches('/'))))
-            .unwrap_or((raw, "/v1".to_string()));
-        let (host, port) = if let Some((h, p)) = host_and_port.split_once(':') {
-            let parsed = p
-                .parse::<u16>()
-                .map_err(|_| format!("invalid port in api_base: {input}"))?;
-            (h.to_string(), parsed)
-        } else {
-            (host_and_port.to_string(), 80)
-        };
-        if host.is_empty() {
-            return Err("api_base host is empty".to_string());
+    fn parse(input: &str) -> Self {
+        Self {
+            base_url: input.trim_end_matches('/').to_string(),
         }
-        Ok(Self {
-            host,
-            port,
-            base_path: path,
-        })
     }
+
+    fn chat_completions_url(&self) -> String {
+        format!("{}/chat/completions", self.base_url)
+    }
+}
+
+fn extract_message_content(payload: &str) -> Option<String> {
+    let (_, after_content_key) = payload.split_once("\"content\":")?;
+    let start_quote = after_content_key.find('"')? + 1;
+    let rest = &after_content_key[start_quote..];
+    let end_quote = rest.find('"')?;
+    Some(rest[..end_quote].to_string())
 }
 
 pub struct FallbackProvider {
@@ -131,10 +126,11 @@ mod tests {
 
     #[test]
     fn parses_openai_endpoint_with_custom_path() {
-        let endpoint = OpenAiEndpoint::parse("http://localhost:1234/custom/v1").expect("parse");
-        assert_eq!(endpoint.host, "localhost");
-        assert_eq!(endpoint.port, 1234);
-        assert_eq!(endpoint.base_path, "/custom/v1");
+        let endpoint = OpenAiEndpoint::parse("http://localhost:1234/custom/v1/");
+        assert_eq!(
+            endpoint.chat_completions_url(),
+            "http://localhost:1234/custom/v1/chat/completions"
+        );
     }
 
     #[test]
@@ -149,5 +145,26 @@ mod tests {
             })
             .expect("fallback should handle request");
         assert_eq!(response.model, "mock");
+    }
+    #[test]
+    #[ignore = "requires external network and valid OPENAI-compatible credentials"]
+    fn real_provider_smoke_test_from_env() {
+        let api_key = std::env::var("LLM_PRIMARY_API_KEY").expect("LLM_PRIMARY_API_KEY missing");
+        let model = std::env::var("LLM_PRIMARY_MODEL").expect("LLM_PRIMARY_MODEL missing");
+        let api_base = std::env::var("LLM_PRIMARY_API_BASE").expect("LLM_PRIMARY_API_BASE missing");
+
+        let provider = OpenAiProvider {
+            api_key,
+            model,
+            api_base,
+        };
+
+        let response = provider
+            .generate(LlmRequest {
+                prompt: "Reply exactly: ok".into(),
+            })
+            .expect("real provider request failed");
+
+        assert!(!response.text.trim().is_empty(), "empty response text");
     }
 }

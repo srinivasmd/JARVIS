@@ -60,6 +60,11 @@ Quick test:
 cargo run -- chat "Summarize secure plugin isolation in one sentence"
 ```
 
+Primary-provider connectivity test (no fallback):
+```bash
+cargo run -- test-llm "Respond with one short sentence about Rust"
+```
+
 ## Tests
 ```bash
 cargo test

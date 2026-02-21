@@ -33,6 +33,7 @@ impl Core {
         })?;
         self.put_memory("last_user_message", input)?;
         self.put_memory("last_assistant_message", &answer.text)?;
+        self.put_memory("last_used_model", &answer.model)?;
         Ok(answer.text)
     }
 
@@ -48,6 +49,7 @@ impl Core {
         Ok(())
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn get_memory(&self, key: &str) -> Result<Option<String>, String> {
         let map = self.memory.lock().map_err(|_| "memory lock")?;
         Ok(map.get(key).map(|v| {
@@ -61,9 +63,12 @@ impl Core {
         let mut fired = 0usize;
         for task in tasks {
             if task.is_due_every_minute() {
-                let manifest =
-                    crate::lc_sandbox::WasmSandbox::load_manifest(&task.plugin_manifest)?;
-                let _ = self.sandbox.execute(&manifest, &task.capability)?;
+                let manifest = crate::lc_sandbox::WasmSandbox::load_manifest(&task.plugin_manifest)
+                    .map_err(|e| format!("task {} manifest error: {}", task.name, e))?;
+                let _ = self
+                    .sandbox
+                    .execute(&manifest, &task.capability)
+                    .map_err(|e| format!("task {} execution error: {}", task.name, e))?;
                 fired += 1;
             }
         }

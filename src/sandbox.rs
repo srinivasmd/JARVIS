@@ -28,11 +28,14 @@ impl WasmSandbox {
 
     pub fn execute(&self, manifest: &PluginManifest, capability: &str) -> Result<i32, String> {
         if !manifest.permissions.contains(capability) {
-            return Err(format!("permission denied for {}", capability));
+            return Err(format!(
+                "permission denied for {} in plugin {}",
+                capability, manifest.name
+            ));
         }
         // Design choice: placeholder execution contract for demo; hook Wasmtime in production build.
         if !std::path::Path::new(&manifest.wasm_path).exists() {
-            return Err("plugin wasm file missing".into());
+            return Err(format!("plugin wasm file missing for {}", manifest.name));
         }
         Ok(0)
     }
